@@ -1,0 +1,362 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+
+
+```{r paqueterias}
+library(dplyr)
+library(readxl)
+library(forecast)
+library(tidyverse)
+library(tidyquant)
+library(timetk)
+library(sweep)
+library(skimr)
+library(imputeTS)
+library(lubridate)
+library(tidyverse)
+library(zoo)
+options(warn=-1)
+```
+
+#DATA PREPARATION
+
+1. Valores por columna
+```{r dataset}
+clte <-read_excel("G:/Mi unidad/Colab_Bases/Forecasting_Categoria_R/Clientes.xlsx",
+                  sheet = "avances")
+```
+
+```{r names-columns}
+names(clte)  #nombres de columnas
+```
+
+```{r names-clientes}
+unique(clte$Sector)  #valores unicos del atributo
+```
+```{r}
+unique(clte$Holding)
+```
+```{r}
+unique(clte$Values)
+```
+
+
+#DATASET
+
+```{r}
+names(clte)[names(clte) == 'Sem_año_default'] <- 'Month'
+
+names(clte)[names(clte) == 'Nombre de Tienda'] <- 'tda'
+```
+
+formato de fecha
+```{r}
+library(lubridate)
+
+clte$Month <- dmy(clte$Month)
+```
+
+Filtrado de clientes
+```{r filtro-dataset}
+
+clte<-clte[clte$Sector=="Higienicos" & clte$Holding=="PCZ" &     clte$Values=="Cltes Marca",]
+```
+
+
+
+**lista de casos incompletos**
+
+--------------SAHUAYO-----
+1) Servilletas & Papel Higienico & Toalla de Papel
+clte<-clte[clte$Valor !=0, ]
+
+ 2) Pañales Adulto
+
+clte<-clte[clte$Valor !=0, ]
+
+clte<-clte[clte$tda !="SAH Tapachula" &
+             clte$tda !="Sahuayo Guadalajara CEDA"   
+           , ]
+
+# 3)Pañales Bebe, solo existen 5 pdv con registros irregulares
+
+clte<-clte[clte$Valor !=0, ]
+
+clte<-clte[clte$tda !="SAH Acapulco" &
+             clte$tda !="SAH Chihuahua" &
+             clte$tda !="SAH Tapachula"  &
+             clte$tda !="SAH Torreon"  & 
+             clte$tda !="SAH Tampico"  & 
+             clte$tda !="Sahuayo Guadalajara CEDA" &
+             clte$tda !="SAH Tultitlan"
+           ,]
+
+# 4) Facilaes, solo existen 2 pdv con registros irregulares
+
+clte<-clte[clte$Valor !=0, ]
+
+clte<-clte[clte$tda !="SAH Aguascalientes" &
+             clte$tda !="SAH Morelia" &
+             clte$tda !="SAH Torreon"  &
+             clte$tda !="Sahuayo D-60 CEDA"  & 
+             clte$tda !="SAH Veracruz"  & 
+             clte$tda !="SAH Guadalajara" &
+             clte$tda !="SAH Durango" &
+             clte$tda !="SAH Oaxaca" &
+             clte$tda !="SAH Puebla" & 
+             clte$tda !="SAH Tultitlan" & 
+             clte$tda !="SAH San Luis Potosi"
+           , ]
+
+# 5) Toallas femeninas, solo existe 1 pdv con registro
+
+# 6) Toallas Humedas, 
+
+clte<-clte[clte$Valor !=0, ]
+
+clte<-clte[clte$tda !="SAH Guadalajara" &
+             clte$tda !="SAH Monterrey"  &
+             clte$tda !="Sahuayo D-60 CEDA" &
+             clte$tda !="SAH Oaxaca" &
+             clte$tda !="SAH San Luis Potosi" & 
+             clte$tda !="SAH Tultitlan" &
+             clte$tda !="Sahuayo Puebla CEDA"  
+           , ]
+
+#-------------DUERO
+
+# 1) Higienicos
+
+clte<-clte[clte$Valor !=0, ]
+
+clte<-clte[clte$tda !="Duero Bodega Chihuahua" & 
+             clte$tda !="Duero Bodega Hermosillo" &
+             clte$tda !="Duero Bodega Mochis" &
+             clte$tda !="Duero Cedis Chihuahua"
+           , ]
+
+#2) Pañal bebe
+
+clte<-clte[clte$Valor !=0, ]
+
+clte<-clte[clte$tda !="Duero Bodega Lazaro Cardenas" 
+           , ]
+
+# 3) Servilletas
+
+clte<-clte[clte$Valor !=0, ]
+
+clte<-clte[clte$tda !="Duero Bodega Culiacan" &
+             clte$tda !="Duero Bodega Mochis"
+           , ]
+
+# 4) Toalla de Papel
+
+clte<-clte[clte$Valor !=0, ]
+
+clte<-clte[clte$tda !="Duero Bodega Chihuahua" &
+             clte$tda !="Duero Bodega Culiacan" &
+             clte$tda !="Duero Bodega Hermosillo" &   
+             clte$tda !="Duero Bodega Mochis" &
+             clte$tda !="Duero Cedis Chihuahua"
+           , ]
+
+#------------PCZ
+
+clte<-clte[clte$tda !="PCZ Cedis Irapuato" 
+           , ]
+-----
+
+
+
+```{r categorias}
+
+clte[clte$Sector=="Higienicos",]<-
+      na_ma(clte[clte$Sector=="Higienicos",], k = 4, weighting =    "simple", maxgap = Inf)
+
+clte[clte$Sector=="Mascarillas",]<-
+      na_ma(clte[clte$Sector=="Mascarillas",], k = 4, weighting =    "simple", maxgap = Inf)
+
+clte[clte$Sector=="Pañales Adultos",]<-
+      na_ma(clte[clte$Sector=="Pañales Adultos",], k = 4, weighting =    "simple", maxgap = Inf)
+
+clte[clte$Sector=="Pañales Bebe",]<-
+      na_ma(clte[clte$Sector=="Pañales Bebe",], k = 4, weighting =    "simple", maxgap = Inf)
+
+clte[clte$Sector=="Pañuelo/Facial",]<-
+      na_ma(clte[clte$Sector=="Pañuelo/Facial",], k = 4, weighting =    "simple", maxgap = Inf)
+
+clte[clte$Sector=="Servilletas",]<-
+      na_ma(clte[clte$Sector=="Servilletas",], k = 4, weighting =    "simple", maxgap = Inf)
+
+clte[clte$Sector=="Toalla Papel",]<-
+      na_ma(clte[clte$Sector=="Toalla Papel",], k = 4, weighting =    "simple", maxgap = Inf)
+
+clte[clte$Sector=="Toallas Femeninas",]<-
+      na_ma(clte[clte$Sector=="Toallas Femeninas",], k = 4, weighting =    "simple", maxgap = Inf)
+
+clte[clte$Sector=="Toallas Humedas",]<-
+      na_ma(clte[clte$Sector=="Toallas Humedas",], k = 4, weighting =    "simple", maxgap = Inf)
+
+```
+
+
+Casos completos 
+```{r cliente-categoria}
+
+clte<-clte[clte$Valor !=0, ]
+
+clte<-clte[clte$tda !="PCZ Cedis Irapuato" 
+           , ]
+
+```
+
+
+#TIME SERIE PLOT
+
+visualizing by sku
+
+```{r serie-chart}
+ggplot(clte, aes(x = Month, y = Valor, group = tda)) +
+      geom_line(aes(color = tda), size = 0.75) +
+      geom_point(aes(color = tda), size = 0.95) + 
+      labs(title = "cliente x categoria",subtitle = "2021-2024")+
+      theme_tq()
+
+sales_nest <- clte %>% group_by(tda) %>% nest()
+```
+
+#HOLT WINTER´S MODEL
+
+convert to time series
+
+```{r sales-ts}
+sales_ts <- sales_nest %>%
+  mutate(data.ts = map(.x       = data, 
+                       .f       = tk_ts, 
+                       select   = -Month, 
+                       start    = c(2021,1),
+                       freq     = 4))
+```
+
+model the time series
+
+```{r sales-fit}
+sales_fit <- sales_ts %>%
+  mutate(fit.HoltWinters = map(.x = data.ts,
+                               .f = HoltWinters))
+```
+
+tidying
+
+```{r tidying}
+tidydata <- sales_fit %>%
+  mutate(tidy = map(fit.HoltWinters,sw_tidy))  %>%
+  unnest(tidy) %>%
+  spread(key = tda, value = estimate)
+```
+
+check model accuracy
+
+```{r glance-data}
+glancedata <- sales_fit %>%
+  mutate(glance = map(fit.HoltWinters, sw_glance)) %>%
+  unnest(glance)
+
+glancedata<- glancedata[,c(1, 5,6,10:16)]
+```
+
+check fitted and residual values
+
+```{r augment-data}
+augmentdata <- sales_fit %>%
+  mutate(augment = map(fit.HoltWinters, sw_augment, timetk_idx = TRUE,
+                       rename_index ="date")) %>% unnest(augment)
+```
+
+plot the residuals/actuals
+
+```{r residual-chart}
+
+augmentdata %>%
+  ggplot(aes(x = date, y = .resid, group = tda)) +
+  geom_hline(yintercept = 0, color = "grey40") +
+  geom_line(color = palette_light()[[2]]) +
+  geom_smooth(method = "loess") +
+  labs(title = "Clientes por tda",
+       subtitle = "HoltWinters Model Residuals", x = "") +
+  theme_tq() +
+  facet_wrap(~ tda, scale = "free_y", ncol = 3) +
+  scale_x_date(date_labels = "%Y")
+```
+
+forecast with the model
+
+```{r forecast-period}
+sales_forecast <- sales_fit %>%
+  mutate(forecast.HoltWinters = map(fit.HoltWinters, forecast, h =15))
+```
+
+tidy the forecast
+
+```{r forecast-tidy}
+sales_forecast_tidy <- sales_forecast %>%
+  mutate(sweep = map(forecast.HoltWinters, sw_sweep, timetk_idx = TRUE)) %>%
+  unnest(sweep)
+```
+
+visualize
+
+```{r forecast-charts}
+sales_forecast_tidy %>%
+  ggplot(aes(x = index, y = Valor, color = key, group = tda)) +
+  geom_ribbon(aes(ymin = lo.95, ymax = hi.95), 
+              fill = "#D5DBFF", color = NA, size = 0) +
+  geom_ribbon(aes(ymin = lo.80, ymax = hi.80, fill = key), 
+              fill = "#596DD5", color = NA, size = 0, alpha = 0.8) +
+  geom_line() +
+  labs(title = "clientes por tda",
+       subtitle = "Holt Winters Model Forecasts",
+       x = "", y = "clientes") +
+  scale_x_date(date_breaks = "1 year", date_labels = "%Y") +
+  scale_color_tq() +
+  scale_fill_tq() +
+  facet_wrap(~ tda, scales = "free_y", ncol = 3) +
+  theme_tq() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+#POINT FORECAST: pre/post produccion
+
+write the tidy sales forecast to excel
+
+```{r forecast-df}
+point_forecasts <- as.data.frame(sales_forecast_tidy[,c(1,6:12)])
+```
+
+```{r actual-data}
+actual <- point_forecasts[point_forecasts$key == "actual",]
+
+actual<- actual %>% filter(index < '2024-10-01')
+```
+
+```{r future-data}
+future <- point_forecasts[point_forecasts$key == "forecast",]
+
+future<-future %>% filter(between(index, as.Date('2024-10-01'),                                                     as.Date('2025-12-01')
+))
+```
+
+```{r joint-data}
+point_forecasts<-rbind(actual,future)
+```
+
+```{r forecast-xlsx}
+writexl::write_xlsx(point_forecasts,"PCZ_MARCA_HIG.xlsx")
+```
+
+
+
