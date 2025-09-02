@@ -1,0 +1,1315 @@
+---
+title: "Cluster & Multivarible Linear Regression"
+author: "Jhonatan Gaona"
+date: "September 2, 2025"
+output: github_document
+---
+```{r}
+#install.packages('BiocManager')
+```
+
+```{r}
+library(pacman)
+
+p_load(ggplot2,ade4,stats,psych,haven,writexl,readr,reshape,dplyr,pacman,
+        cluster, aplpack, fpc, foreign, TeachingDemos,
+       factoextra, NbClust, ape, corrplot, DataExplorer,
+       funModeling, compareGroups, tidyverse, dendextend,
+       igraph, FeatureImpCluster, flexclust, h2o,
+       gghighlight, BiocManager,read_excel)
+```
+
+```{r}
+options(scipen = 999)
+options(digits = 2)      
+```
+
+#### DATSETS
+
+dataset: rentabilidad
+```{r}
+library(readxl)
+library(tidyverse)
+
+rentabilidad_22 <- read_excel("G:/Mi unidad/Colab_Bases/Regresion/rentabilidad_22.xlsx")
+
+rentabilidad_23 <- read_excel("G:/Mi unidad/Colab_Bases/Regresion/rentabilidad_23.xlsx")
+
+rentabilidad_24 <- read_excel("G:/Mi unidad/Colab_Bases/Regresion/rentabilidad_24.xlsx")
+
+rentabilidad<-rbind(rentabilidad_22,rentabilidad_23,rentabilidad_24)
+```
+
+#### Arreglos
+
+Observar los valores ausenetes en el dataset 
+```{r}
+# cuantos nas tiene el dataset
+sapply(rentabilidad,function(x)sum(is.na(x)))
+```
+
+Remplazar valores ausentes con 0 solo en columnas numericas y convertir los valores nulos en valores positivos
+```{r}
+# seleccionar solo columnas numericas
+#select_if(rentabilidad, is.numeric)
+
+# remplazo de valores ausentes
+rentabilidad<-
+          rentabilidad %>% 
+          mutate_if(is.numeric,list(~replace_na(., 0)))
+
+
+# valores asbsolutos sobre la matriz de valores numercicos
+rentabilidad[,c(14:33)]<- abs(rentabilidad[,c(14:33)])
+```
+
+
+
+### Descriptivo
+
+```{r}
+library(summarytools)
+
+print(dfSummary(rentabilidad[14:33], 
+                varnumbers   = FALSE, 
+                valid.col    = FALSE, 
+                graph.magnif = 0.75),
+                method = "render")
+```
+
+### Datasets
+
+Filtrado de rentabilidad:referirse a este panel, dado que contempla 23 variables de analisis.
+
+
+```{r}
+colnames(rentabilidad)
+```
+
+```{r}
+colnames(rentabilidad)
+```
+
+
+```{r}
+
+rentabilidad<-rentabilidad[,-c(2,3,6,7,8,10,11,12,13,14,17,21,33)]
+
+# renombras columnas por posicion
+rentabilidad <- setNames(rentabilidad,
+                         c("periodo","negocio","canal","pagador",
+                           "vol", "gst_clt", "conv",
+                                   "fll_rt", "rapp", "cst_drt",
+                                   "cst_ind","gst_var","flte",
+                                   "trasp", "gst_log", "tar",
+                                   "mrg_abs", "gst_mkt",
+                                   "gst_vta","gst_adm"
+                                   
+                             )) 
+
+# crear 2 datasets por categoria
+
+tissue<-
+  rentabilidad[
+    rentabilidad$negocio== "CONSUMER TISSUE" &
+    rentabilidad$canal== "Tradicional" &
+    rentabilidad$periodo== 2024
+    , ]
+
+personal_care<-
+  rentabilidad[
+    rentabilidad$negocio== "PERSONAL CARE" &
+    rentabilidad$canal== "Tradicional" &
+    rentabilidad$periodo== 2024
+    , ]
+```
+
+
+Remplazar los nombres sobre el atributo pagador, para acortar los nombres que se observaran en el dendograma
+```{r}
+# Define the conditions and replacement values
+conditions <- c("ABAJUX SA DE CV",
+"ABARROTERA DEL DUERO SA DE CV",
+"ABARROTERA FUENTES S.A. DE C.V.",
+"ABARROTERA SAN ANTONIO S.A. DE C.V.",
+"ABARROTES ABEJA, S.A. DE C.V.",
+"ABARROTES CASA VARGAS S.A.DE C.V.",
+"ABARROTES DEL CENTRO GUERRERO S.A.",
+"ABARROTES LA SOLEDAD SA DE CV",
+"ABARROTES LOO SA DE CV",
+"ABARROTES MONTERREY S.A. DE C.V.",
+"ABARROTES RIKOZA SA DE CV",
+"ABARROTES SAN LUIS, S.A. DE C.V.",
+"ABASTECEDORA COMERCIAL DE PARRAL",
+"ABASUR, S.A DE C.V.",
+"AUTOSERVICIO DEL AHORRO SA DE CV",
+"BODEGA DE OFERTAS Y PRECIOS",
+"BODEGAS FERNANDEZ COMPANY SA DE CV",
+"CARLOS ANTONIO HEIMPEL WISBRUN CHIHUAHUA",
+"CASA ALONSO DE CUERNAVACA S.A. DE C",
+"CASA SANTOS LUGO S.A. DE C.V.",
+"CENTRAL DE VIVERES DEL SURESTE",
+"CENTRAL MAYORISTA Y COMERCIAL PUNTO DE VENTA SA DE CV",
+"CENTRO COMERCIAL MERAZ S.A. DE C.V.",
+"COMERCIAL DE ABARROTERAS",
+"COMERCIAL DE ABARROTES Y DIST",
+"COMERCIAL GUVIER SA DE CV",
+"COMERCIAL TREVINO DE REYNOSA S.A. D",
+"COMERCIAL TREVINO S.A. DE C.V.",
+"COMERCIALIZADORA DE PRODUCTOS BASIC",
+"COMERCIALIZADORA GRUPO SCORPION",
+"COMPAÑIA MAYORISTA DE ABARROTES",
+"CORPORACION SANCHEZ, SA DE CV",
+"CORPORATIVO COMERCIAL LOS ANICETOS",
+"CORPORATIVO INDUSTRIAL GSEGOLD SA D",
+"DAPSA MAYORISTA Y CIA S DE RL DE CV",
+"DESARROLLO COMERCIAL ABARROTERO S.A DE C.V",
+"DICONSA",
+"DISTRIBUIDORA SUMERCA SA DE CV",
+"DISTRIBUIDORA VIGIL",
+"EMPAQUES DESECHABLES",
+"ENBE, S.A. DE C.V.",
+"FERNANDEZ MARKET, S.A. DE C.V.",
+"GRUPO ASEOINDUSTRIAL",
+"GRUPO DIMACSAR SA DE CV",
+"GRUPO MAYORISTA SUPER TIENDAZZ",
+"GRUPO ZORRO ABARROTERO S DE",
+"HIGIENICOS Y DESECHABLES",
+"IMPULSORA SAHUAYO S.A. DE C.V.",
+"LA MISION SUPERMERCADOS S.A. DE C.V",
+"LINEAS EXCLUSIVAS SA DE CV",
+"MAS BODEGA Y LOGISTICA SA DE CV",
+"MAXIMA DISTRIBUCION SM SA DE C",
+"MEGABITS SOLUTIONS SA DE CV",
+"MERCADOS COAHUILENSES JB , SA DE CV",
+"MINI ABASTOS S.A. DE C.V.",
+"OCAMI COMERCIALIZACION S.A. DE C.V.",
+"PICK-ONE S.A DE C.V",
+"PRODUCTOS DE CONSUMO Z, S.A.",
+"PROMOTORA ABARROTERA DEL NORTE S.A.",
+"PROVEEDORA DE ABARROTES RIVERA",
+"PROVEEDORA DEL PANADERO SA DE CV",
+"RUBEN BOLIVAR AGUILAR GONZALEZ",
+"SCORPION DISTRIBUIDOR MAYORISTA,",
+"SERVICIO COMERCIAL GARIS, SA DE CV",
+"SERVICIOS COMERCIALES MORAN, S.A.",
+"SOCORRO HERNANDEZ JIMENEZ",
+"SUPER ABARROTES LUPITA",
+"SUPER ACERTIJO S DE R.L DE C.V",
+"SUPER MERCADOS DE ZAPOPAN",
+"SUPER SAN FRANCISCO DE ASIS S.A. DE",
+"TIENDA ABARROTERA AMIGA SA DE CV",
+"TIENDAS GRAN'D S.A. DE C.V.",
+"UNION PARA COMPRA DE COMERCIANTES D",
+"WULMEX SA DE CV",
+"ZAPETAS DE TORREON, S.A. DE C.V."
+)
+
+
+replacement_values <- c("ABAJUX",
+"DUERO",
+"FUENTES",
+"SAN_ANTONIO",
+"ABEJA",
+"VARGAS",
+"GUERRERO",
+"SOLEDAD",
+"LOO",
+"MTY",
+"RIKOZA",
+"SAN_LUIS",
+"PARRAL",
+"ABASUR",
+"AHORRO",
+"BODEGA_OFERTA",
+"FERNADEZ",
+"WISBRUN",
+"ALONSO",
+"LUGO",
+"CEVISUR",
+"COMA",
+"MERAZ",
+"ABARROTERAS",
+"ABARRT_DISTRIB",
+"GUVIER",
+"TREVIÑO",
+"TREVIÑO",
+"BASICOS",
+"SCORPION",
+"COMA",
+"SANCHEZ",
+"ANICETOS",
+"GSEGOLD",
+"DAPSA",
+"DECASA",
+"DICONSA",
+"SUMERCA",
+"VIGIL",
+"DESECHABLES",
+"ENBE",
+"FERNADEZ",
+"ASEOINDUSTRIAL",
+"DIMACSAR",
+"TIENDAZZ",
+"ZORRO",
+"H&G",
+"SAHUAYO",
+"MISION",
+"EXCLUSIVAS",
+"MASBODEGA",
+"MAXIMA",
+"MEGABITS",
+"COAHUILENSE",
+"MINIABASTOS",
+"OCAMI",
+"PICKONE",
+"PCZ",
+"PROMOTORA",
+"RIVERA",
+"DUNOSUSA",
+"RUBEN",
+"SCORPION",
+"GARIS",
+"MORAN",
+"SOCORRO",
+"LUPITA",
+"ACERTIJOS",
+"SUSUPER",
+"SUPERAKI",
+"AMIGA",
+"GRAND",
+"UNIONCOMER",
+"WULMEX",
+"ZAPETAS"
+)
+ 
+# Use replace() to replace the names in the 'Names' column
+
+tissue$pagador <- replace(tissue$pagador, 
+                                tissue$pagador %in% conditions,
+                                replacement_values)
+ 
+
+personal_care$pagador <- replace(personal_care$pagador, 
+                                personal_care$pagador %in% conditions,
+                                replacement_values)
+
+df<-tissue
+```
+
+Crear tablas pivote para simplificar las entradas de datos
+```{r}
+library(plyr)
+library(tibble)
+library(Hmisc)
+
+# Tissue, tabla pivote rapida
+tissue<-
+  ddply(tissue, "pagador", summarize, 
+      gst_clt = sum(gst_clt),
+      conv = sum(conv),
+      fll_rt = sum(fll_rt),
+      rapp = sum(rapp),
+      cst_drt = sum(cst_drt),
+      cst_ind = sum(cst_ind),
+      gst_var = sum(gst_var),
+      flte = sum(flte),
+      trasp = sum(trasp),
+      gst_log = sum(gst_log),
+      tar = sum(tar),
+      mrg_abs = sum(mrg_abs),
+      gst_mkt = sum(gst_mkt),
+      gst_vta = sum(gst_vta),
+      gst_adm = sum(gst_adm)
+      )
+
+# convertir la TP en dataframe
+tissue<-as.data.frame(tissue)
+
+# omitir los nas porque causan error
+tissue<-na.omit(tissue)
+
+# indicar la primera columna como columna index
+tissue <- tissue |> column_to_rownames(var = 'pagador')
+
+
+# Personal Care, tabla pivote rapida
+personal_care<-
+  ddply(personal_care, "pagador", summarize, 
+      gst_clt = sum(gst_clt),
+      conv = sum(conv),
+      fll_rt = sum(fll_rt),
+      rapp = sum(rapp),
+      cst_drt = sum(cst_drt),
+      cst_ind = sum(cst_ind),
+      gst_var = sum(gst_var),
+      flte = sum(flte),
+      trasp = sum(trasp),
+      gst_log = sum(gst_log),
+      tar = sum(tar),
+      mrg_abs = sum(mrg_abs),
+      gst_mkt = sum(gst_mkt),
+      gst_vta = sum(gst_vta),
+      gst_adm = sum(gst_adm)
+      )
+
+# convertir la TP en dataframe
+personal_care<-as.data.frame(personal_care)
+
+# omitir los nas porque causan error
+personal_care<-na.omit(personal_care)
+
+# indicar la primera columna como columna index
+personal_care <- personal_care |> column_to_rownames(var = 'pagador')
+```
+
+### CLUSTER ANALYSIS
+
+#### Correlaciones
+
+```{r}
+# escala sobre las columnas
+
+tissue_norm<- scale(x= tissue[,c(1:15)],
+                    center = TRUE,
+                     scale = TRUE)
+```
+
+
+Matriz de correlaciones
+```{r}
+mat_corr<-cor(tissue_norm)
+mat_corr
+```
+
+#### Similaridad
+Se realiza las medidas de similaridad entre los casos
+
+
+Matriz de distancias euclidea
+```{r}
+matriz.dis.euclid<- dist(tissue_norm,
+                         method="euclidean",
+                         diag=T)
+```
+
+Matriz de distancia euclidea al cuadrado
+```{r}
+matriz.dis.euclid2<-(matriz.dis.euclid)^2 
+```
+
+Identificador de Outliers
+```{r}
+mean<-colMeans(tissue_norm)
+
+Sx<-cov(tissue_norm)
+
+D2<-mahalanobis(tissue_norm, mean,Sx, inverted=FALSE)
+D2
+
+pvalor<-pchisq(D2, df=6, lower.tail = FALSE)
+```
+
+#### Seleccion de conglomerados
+
+Decision de los grupos a retener mediate distintos metodos y bajo un solo tipo de distancia.
+
+
+1) Metodo Centroide
+```{r}
+
+# regla de mayorias
+NbClust(tissue_norm, distance="euclidean", min.nc = 2,
+             max.nc=15, method="centroid", index="alllong")
+
+#esto coloca el grupo correspondiente a cada observacion
+#res$Best.partition 
+```
+
+2) Metodo del vecino más cercano
+```{r}
+NbClust(tissue_norm, distance="euclidean", min.nc = 2,
+             max.nc=15, method="single", index="alllong")
+
+```
+
+3) Metodo del vecino más lejano
+```{r}
+NbClust(tissue_norm, distance="euclidean", min.nc = 2,
+             max.nc=15, method="complete", index="alllong")
+```
+
+4) Metodo average
+```{r}
+NbClust(tissue_norm, distance="euclidean", min.nc = 2,
+             max.nc=15, method="average", index="alllong")
+
+```
+
+5) Metodo ward
+```{r}
+NbClust(tissue_norm, distance="euclidean", min.nc = 2,max.nc=15, method="ward.D2", index="alllong")
+```
+
+#### Analisis jerarquico
+
+1) Metodo del Centroide: fragmenta los grupos desde el centro hacia el exterior
+```{r}
+# jerarquias
+hclust.centroide<- hclust(matriz.dis.euclid2,
+                          method="centroid")
+# grafico
+plot(hclust.centroide)
+
+# grupos acorde al NbClust
+grupos<-cutree(hclust.centroide, k=3) # cut tree into 3 clusters
+
+# draw dendogram with red borders around the 3 clusters 
+rect.hclust(hclust.centroide,k=3,border=3:4)
+```
+
+
+2) Metodo del vecino más cercano: Minimum distance between two sets
+```{r}
+# jerarquias
+hclust.single<- hclust(matriz.dis.euclid2,
+                          method="single")
+# grafico
+plot(hclust.single)
+
+# grupos acorde al NbClust
+grupos<-cutree(hclust.single, k=3) # cut tree into 3 clusters
+
+# draw dendogram with red borders around the 3 clusters 
+rect.hclust(hclust.single,k=3,border=3:4)
+```
+
+3) Metodo del vecino más lejano: Maximum distance between two sets
+```{r}
+# jerarquias
+hclust.complete<- hclust(matriz.dis.euclid2,
+                          method="complete")
+# grafico
+plot(hclust.complete)
+
+# grupos acorde al NbClust
+grupos<-cutree(hclust.complete, k=3) # cut tree into 3 clusters
+
+# draw dendogram with red borders around the 3 clusters 
+rect.hclust(hclust.complete,k=3,border=3:4)
+```
+
+4) Metodo average:Average distance between two sets
+```{r}
+# jerarquias
+hclust.avg<- hclust(matriz.dis.euclid2,
+                          method="average")
+# grafico
+plot(hclust.avg)
+
+# grupos acorde al NbClust
+grupos<-cutree(hclust.avg, k=2) # cut tree into 3 clusters
+
+# draw dendogram with red borders around the 3 clusters 
+rect.hclust(hclust.avg,k=2,border=3:4)
+```
+
+
+4) Metodo ward: Minimize the total within cluster variance
+```{r}
+# jerarquias
+hclust.ward<- hclust(matriz.dis.euclid2,
+                          method="ward.D2")
+# grafico
+plot(hclust.ward,)
+
+# grupos acorde al NbClust
+grupos<-cutree(hclust.ward, k=4) # cut tree into 4 clusters
+
+# draw dendogram with red borders around the 4 clusters 
+rect.hclust(hclust.ward,k=4,border= 3:4)
+```
+
+
+Armado del dataset conforme al hclust de WARD
+```{r}
+table(grupos)
+
+ward_table <- cbind(tissue[,-1],grupos)
+
+as.data.frame(ward_table)
+
+```
+
+
+Cluster jerarquico utilizando el metodo ward
+```{r}
+res.hc <- hclust(matriz.dis.euclid, 
+                 method = "ward.D2")
+
+# grupos sugeridos
+grp <- cutree(res.hc, k = 4)
+
+# mapa de coordenadas
+fviz_cluster(list
+              (data = tissue_norm, cluster = grp),
+              ellipse.type = "convex",
+              repel = T,  
+              show.clust.cent = T, ggtheme = theme_minimal())
+```
+
+
+#### Validacion
+(https://rpubs.com/XC_Prime/cluster_analysis)
+
+
+Aplicaremos el metodo de criterio de heterogeneidad entre los clusteres a partir el metodo seleccionado (WARD). En estricto sentido, utilizaremos el ANOVA para interpretar las variables dentro de los grupos
+```{r}
+clust_4 <- cutree(hclust.ward,4)
+
+clust_4 <- as.factor(clust_4)
+
+anova_tissue <- aov(cbind(gst_clt,
+                       conv,
+                       fll_rt,
+                       rapp,
+                       cst_drt,
+                       cst_ind,
+                       gst_var,
+                       flte,
+                       trasp,
+                       gst_log,
+                       tar,
+                       mrg_abs,
+                       gst_mkt,
+                       gst_vta,
+                       gst_adm) ~ clust_4, data = tissue)
+                       
+
+
+# get a summary of anova results
+summary(anova_tissue)
+```
+
+Los resultados indican que todas las variables son significativas y valores diferentes a cero o menor a 0.05
+
+
+#### Interpretacion de clusters
+
+Observamos el valor medio de las variables conforme a los grupos establecidos en el metodo WARD
+```{r}
+aggregate(tissue,list(grupos),mean)
+
+#library(openxlsx)
+#write.xlsx(df,'valores_medios.xlsx')
+```
+
+
+
+### REGRESION LINEAL MULTIPLE
+
+##### Dataset
+
+Construiremos una tabla de contigencia para que resuma los valores del dataset original dentro de los periodos de analisis
+```{r}
+# Tissue, tabla pivote rapida
+library(plyr)
+library(tibble)
+
+# tabla de contigencia rapida
+df<-
+  ddply(df, "pagador", summarize, 
+      vol = sum(vol),
+      gst_clt = sum(gst_clt),
+      conv = sum(conv),
+      fll_rt = sum(fll_rt),
+      rapp = sum(rapp),
+      cst_drt = sum(cst_drt),
+      cst_ind = sum(cst_ind),
+      gst_vta = sum(gst_vta),
+      flte = sum(flte),
+      trasp = sum(trasp),
+      gst_log = sum(gst_log),
+      tar = sum(tar),
+      gst_mkt = sum(gst_mkt),
+      gst_vta = sum(gst_vat),
+      gst_adm = sum(gst_adm)
+      )
+```
+
+Antes de crear una variable categorica, primero debemos de crear un dataframe para que despues hacer un vlookup sobre la tabla de contiegencia
+```{r}
+# crear un df para el mercado nacional
+nacional<- list(
+  pagador= c("DUERO", "DECASA","SAHUAYO", "PCZ"),
+  mercado= "nacionales")
+
+nacionales<-as.data.frame(nacional)
+
+
+# crear un df para el mercado regional
+regional<-list(
+pagador= c("VARGAS", "MTY", "COMA", "BASICOS", "SCORPION", "COMA", "DICONSA", "VIGIL", "TIENDAZZ", "ZORRO", "MASBODEGA", "OCAMI", "PROMOTORA", "RIVERA", "SCORPION", "GARIS"),
+mercado= "regionales")
+
+regionales<-as.data.frame(regional)
+
+
+# crear un df para el mercado local
+local<- list(
+pagador= 
+  c("ABAJUX",
+"FUENTES",
+"SAN_ANTONIO",
+"ABEJA",
+"GUERRERO",
+"SOLEDAD",
+"LOO",
+"RIKOZA",
+"SAN_LUIS",
+"PARRAL",
+"ABASUR",
+"AHORRO",
+"BODEGA_OFERTA",
+"FERNADEZ",
+"WISBRUN",
+"ALONSO",
+"LUGO",
+"CEVISUR",
+"MERAZ",
+"ABARROTERAS",
+"ABARRT_DISTRIB",
+"GUVIER",
+"TREVIÑO",
+"SANCHEZ",
+"ANICETOS",
+"GSEGOLD",
+"DAPSA",
+"SUMERCA",
+"DESECHABLES",
+"ENBE",
+"FERNADEZ",
+"ASEOINDUSTRIAL",
+"DIMACSAR",
+"H&G",
+"MISION",
+"EXCLUSIVAS",
+"MAXIMA",
+"MEGABITS",
+"COAHUILENSE",
+"MINIABASTOS",
+"PICKONE",
+"DUNOSUSA",
+"RUBEN",
+"MORAN",
+"SOCORRO",
+"LUPITA",
+"ACERTIJOS",
+"SUSUPER",
+"SUPERAKI",
+"AMIGA",
+"GRAND",
+"UNIONCOMER",
+"WULMEX",
+"ZAPETAS"
+),
+mercado = "locales")
+
+locales<-as.data.frame(local)
+
+# concatenar los dataframes
+
+mercados<-rbind(nacionales,regionales,locales)
+
+# lookup value con el mismo Key_column, y toma las columnas diferetes
+df<- merge(df, mercados, by="pagador")
+
+# omitir los nas porque causan error
+df<-na.omit(df)
+
+# eliminar la columna de pagador (ya no es necesario)
+df<-df[,-c(1)]
+```
+
+
+##### Analisis exploratorio
+
+1. Convertir la variable mercado en variable factor para el análisis
+```{r}
+# convertir la variable categorica en dummy
+df$mercado <- as.factor(df$mercado)
+```
+
+Se observa lo siguiente:
+- presenciamos una subrepresentacion de una categoria
+- outliers en la variable de interés
+```{r}
+ggplot(data = df, 
+       mapping=aes(x = mercado, y = log(vol), color=mercado)) +
+       geom_boxplot() +
+       geom_jitter(width = 0.1) +
+       theme_bw() + theme(legend.position = "none")
+```
+
+```{r}
+# contedo de frecuencias
+(mercado_stats <- freq(df$mercado)) 
+
+# reporte de frecuencias
+print(mercado_stats,
+      report.nas     = FALSE, 
+      totals         = FALSE, 
+      display.type   = FALSE,
+      Variable.label = "Mercado")
+```
+
+Estadistica descriptiva por grupo de referencia
+```{r}
+(tissue_stats_by_market <- stby(data     = df, 
+                               INDICES   = df$mercado, 
+                               FUN       = descr, 
+                               stats     = "common", 
+                               transpose = TRUE))
+```
+
+2. Correlaciones
+
+Considerando los coeficientes 
+  1: Perfect positive linear relationship.
+ -1: Perfect negative linear relationship.
+  0: No linear relationship
+  
+Considerando los p-values
+  p-value < 0.05 la correlacion es estadisticamente signficativa
+
+**No se puede guardar en Github, pero si logra operacionalizarse**
+```{r}
+# correlation tests for whole dataset
+library(Hmisc)
+
+
+# correlaciones en formato de matriz
+
+#rcorr(as.matrix(df[2:14])) 
+
+
+# tabla de correlaciones
+
+#flattenCorrMatrix <- function(cormat, pmat) {
+#  ut <- upper.tri(cormat)
+#  data.frame(
+#    row = rownames(cormat)[row(cormat)[ut]],
+#    column = rownames(cormat)[col(cormat)[ut]],
+#    cor  =(cormat)[ut],
+#    p = pmat[ut]
+#    )
+#}
+
+#flattenCorrMatrix(res$r, res$P)
+```
+
+##### Ajuste de datos
+
+1. Oversampling
+
+Eso debería estar cercano a 1
+```{r}
+library(imbalance)
+
+imbalanceRatio(df, classAttr = "mercado" )
+```
+Dado que existe un problema de desbalance de datos, será necesario ajustar el daset para mejorar el modelo.
+Nuestra variable objetivo no se encuentra cercano a una distribución normal, por lo que será necesario realizar ajustes sobre esta
+```{r}
+# valores absolutos
+table(df$mercado)
+
+# valores relativos
+prop.table(table((df$mercado)))
+```
+Histograma y grafico de densidad sobre la variable objetivo
+```{r}
+with(df, {
+  hist(df$vol, breaks="FD", freq=FALSE, col="violet")
+  lines(density(df$vol), lwd = 2)
+  lines(density(df$vol, adjust = 0.5),lwd = 1)
+  rug(df$vol)
+})
+```
+Test de Shapiro: no pasa la prueba (>0.05)
+```{r}
+shapiro.test(df$vol)
+```
+
+
+
+
+#### Modelo LMM
+
+Se construye el modelo de regresion multiple conforme a las variables en sus unidades originales.
+
+Antes de realizar una conclusión, es preferible evaluar sus condiciones 
+```{r}
+modelo <- lm(vol ~ gst_clt +conv + fll_rt + rapp + cst_drt + cst_ind + gst_vta + flte + trasp + gst_log + tar + gst_mkt + gst_adm +
+               mercado, 
+             data = df)
+
+summary(modelo)
+```
+```{r}
+confint(modelo)
+```
+Realizaremos un ejercicio de prediccion del modelo con una función predictora
+```{r}
+# valores sobre las variables
+#newdata = data.frame(conv= c(10000,12000,15000),  
+#                      gst_mkt= c(3000,5000,7000),
+#                     gst_clt= c(3000,5000,7000))#
+
+# variables dentro del modelo
+#predict(modelo, newdata)
+```
+
+```{r}
+library(performance)
+library(see)
+
+#check_model(modelo)
+```
+
+
+#####  Condiciones de regresion lineal multiple
+
+1.Relación lineal entre los predictores numéricos y la variable dependiente:
+
+Presenciamos multiples outliers fuera de la banda de confianza.
+
+Conclusion: no pasa, y es necesario evaluar los aributos del dataset
+```{r}
+library(ggplot2)
+
+ggplot(data = df, 
+       aes(x = vol, 
+           y = modelo$residuals)) + 
+            geom_point() +
+            geom_smooth(color = "firebrick") +
+            geom_hline(yintercept = 0) +
+            theme_bw()
+```
+
+2- Distribucion normal de los residuos
+
+```{r}
+qqnorm(modelo$residuals)
+qqline(modelo$residuals)
+```
+Para evaluar si existe una normalidad de los residuales en el modelo, se pone a prueba el Test de Shapiro. Este gurda un nivel de signficancia del 0.05 con las siguientes hipotesis:
+
+- H0: La distribución es normal o parametrico (p-value > 0.05)
+- H1: La distribución no es normal o parametrico (p-value < 0.05)
+```{r}
+shapiro.test(modelo$residuals)
+```
+Observemos el dato atipico en los residuales, y probemos de nuevo el test pero sin este dato maximo. 
+```{r}
+which.max(modelo$residuals)
+```
+```{r}
+shapiro.test(modelo$residuals[-22])
+```
+Conclusiones: se aprueba la normalidad de los residuales en el test, por lo que no es necesario realizar algun ajuste
+
+
+3. Variabilidad constante de los residuos
+
+```{r}
+ggplot(data = data.frame(predict_values = predict(modelo),
+                         residuos = residuals(modelo)),
+                    aes(x = predict_values, y = residuos)) +
+    geom_point() +
+    geom_smooth(color = "firebrick", se = FALSE) +
+    geom_hline(yintercept = 0) +
+    theme_bw()
+```
+
+El test de Breusch-Pagan nos indicaria que:
+
+HO: Homocedastico. Los errores tienen varianza constante [p-value > 0.05]
+H1: Heterocedastico. Los errores no tienen varianza constante [p-value < 0.05]
+
+```{r}
+library(lmtest)
+
+bptest(modelo)
+```
+
+Conclusiones: el modelo presenta heterocedasticidad, y hay que realizar ajustes.
+
+4. Multicolinealidad
+
+*Si VIF ≤ 5 no hay problemas de multicolinealidad.
+
+*Si 5 < VIF ≤ 10 hay problemas de multicolinealidad moderada.
+
+*Si VIF > 10 hay problemas de multicolinealidad graves.
+
+
+Aplicar criterio de seleccion para las variables explicativas
+
+```{r}
+library(car)
+
+vif(modelo)
+```
+Conclusiones: modelo arroja multicolinearidad en: convenios, rappel, costos directos, costos indirectos, gasto venta. Hay que realizar un ajuste del modelo
+
+5. Autocorrelacion (Prueba de independencia de los errores)
+
+Primer orden, Durbin-Watson
+H0:los errores son independientes [p-value > 0.05]
+H1:los errores no son independientes [p-value < 0.05]
+DWT: valor cercano a 2 indica no autocorrelacion serial
+
+```{r}
+library(car)
+
+dw_test <- dwtest(modelo)
+
+# View the test result
+print(dw_test)
+```
+Segundo orden: Multiplicador de Lagrange
+```{r}
+lm1<-bgtest(modelo,order = 1)
+
+print(lm1)
+```
+```{r}
+lm2<-bgtest(modelo,order = 2)
+
+print(lm2)
+```
+
+Conclusiones: p-value es mayor que el nivel de significancia (0.05), se concluye que los residuales en el modelo son independientes o no estan correlacionados. Aplica en el segundo y primer orden
+
+
+6. Tamaño de la muestra
+
+
+7. Presencia de outliers y valores influyentes
+
+Se observa que dentro del modelo existe un outlier correspondiente a la observacion 22
+```{r}
+outlierTest(modelo)
+```
+En necesario determinar si presenta un nivel de influencia, de esta o de otras observaciones
+```{r}
+summary(influence.measures(modelo))
+```
+A pesar de existir observaciones influyentes, se determina lo siguiente:
+
+- cookD(>0.5): deberían ser investigados
+- Studentized Residual (>3): debe de estudiarse
+- Hat value or Leverages Hat (>0.5): 
+```{r}
+influencePlot(modelo)
+```
+
+Conclusiones:  el analisis muestra varias observaciones influyentes, solo la observacion 22 amerita estudiarlo y observar su impacto fuera del modelo.
+
+8. Conclusiones
+Revisar el modelo
+
+
+##### 2do modelo
+
+Tendremos que resolver los problemas que presenta la regresión en sus multiples condiciones, a saber
+
++homocedasticidad
++VIF valores
+
+Incluiremos solo las variables que tienen < de 5ppts de VIF del modelo original
+```{r}
+modelo2 <- lm(vol ~ gst_clt + fll_rt +
+                  flte + cst_ind +
+                  trasp + gst_log + tar + gst_mkt + gst_adm +
+                  mercado, 
+                    data = df)
+summary(modelo2)
+```
+
+Para resolver el problema de la homocedasticidad, tendremos que realizar un problema de pesos podenderados sobre la regresion lineal. Porque el problema radica en varianzas no constantes en los residuales
+```{r}
+#define weights to use
+wt <- 
+  1 / lm(abs(modelo2$residuals) ~ modelo2$fitted.values)$fitted.values^2
+
+#perform weighted least squares regression
+wls_model <- lm(vol ~ gst_clt + fll_rt +
+                  flte + cst_ind+
+                  trasp + gst_log + tar + gst_mkt + gst_adm +
+                  mercado, 
+                    data = df, weights=wt)
+
+
+#view summary of model
+summary(wls_model)
+```
+Interpretación:
+
+El volumen de venta depende de la siguiente relacion
+
+ vol= 11.347 + 0.00002433[gst_clt] + 0.00005179[fll_rt] +
+      0.00001481[flte] + 0.00005484[cst_ind] -
+      -0.00008427[trasp] + 0.00002080[gst_log] +
+      0.00004930[tar] -0.00002520[gst_mkt] +
+      0.00021634[gst_adm] - 2.33867921[nacional] + 0.36082753[regional]
+      
+solo las variables de gasto cliente, flete, costos indirectos de produccion y gastos administrativos estan significativamente asociadas con los cambios en el volumen de venta. Las variables no significativas, indican que ante un aumento de unidades de cambio no afectan significativamente el volumen.
+
+El coeficiente es interpretado como el efecto promedio de cambio en volumen cuando se incrementa una unidad en las variables predictoras, manteniendo constante toda los demas predictores en sus respectivas unidades.
+
+La regresion utiliza se sustenta en clientes con cobertura local como linea base para las estimaciones: 
+
+1. en promedio, los clientes locales venden 2.33 de volumen menos vs los clientes con cobertura nacional;
+
+vol= (11.347-2.33867921[nacional]) + 0.00002433[gst_clt] +            0.00005179[fll_rt] + 0.00001481[flte] + 0.00005484[cst_ind]
+      -0.00008427[trasp] + 0.00002080[gst_log] + 0.00004930[tar] - 0.00002520[gst_mkt] + 0.00021634[gst_adm] 
+      
+      
+2. en promedio, los clientes locales venden 0.36 de volumen adicional vs los clientes de cobertura regional.
+
+vol= (11.347 + 0.36082753[regional])  + 0.00002433[gst_clt] + 0.00005179[fll_rt] + 0.00001481[flte] + 0.00005484[cst_ind] -
+      -0.00008427[trasp] + 0.00002080[gst_log] +
+      0.00004930[tar] - 0.00002520[gst_mkt] +
+      0.00021634[gst_adm] 
+
+
+#####  Condiciones de regresion lineal multiple
+
+1.Relación lineal entre los predictores numéricos y la variable dependiente:
+```{r}
+library(ggplot2)
+
+ggplot(data = df, 
+       aes(x = vol, 
+           y = wls_model$residuals)) + 
+            geom_point() +
+            geom_smooth(color = "firebrick") +
+            geom_hline(yintercept = 0) +
+            theme_bw()
+```
+
+2- Distribucion normal de los residuos
+
+```{r}
+qqnorm(wls_model$residuals)
+qqline(wls_model$residuals)
+```
+- H0: La distribución es normal o parametrico (p-value > 0.05)
+- H1: La distribución no es normal o parametrico (p-value < 0.05)
+```{r}
+shapiro.test(wls_model$residuals)
+```
+Observemos el dato atipico en los residuales, y probemos de nuevo el test pero sin este dato maximo. 
+```{r}
+which.max(wls_model$residuals)
+```
+```{r}
+shapiro.test(wls_model$residuals[-56])
+```
+3. Variabilidad constante de los residuos
+
+```{r}
+ggplot(data = data.frame(
+                      predict_values = predict(wls_model),
+                         residuos = residuals(wls_model)),
+                    aes(x = predict_values, y = residuos)) +
+    geom_point() +
+    geom_smooth(color = "firebrick", se = FALSE) +
+    geom_hline(yintercept = 0) +
+    theme_bw()
+```
+
+El test de Breusch-Pagan nos indicaria que:
+
+HO: Homocedastico. Los errores tienen varianza constante [p-value > 0.05]
+H1: Heterocedastico. Los errores no tienen varianza constante [p-value < 0.05]
+
+```{r}
+library(lmtest)
+
+bptest(wls_model)
+```
+
+4. Multicolinealidad
+
+Coeficientes mayores a 5ppts, indica una correlacion potencial entre el predictor dado con respecto a otros predictores en el modelo.
+
+```{r}
+library(car)
+
+vif(wls_model)
+```
+Conclusiones: modelo arroja multicolinearidad en: convenios, rappel, costos directos, costos indirectos, gasto venta. Hay que realizar un ajuste del modelo
+
+5. Autocorrelacion (Prueba de independencia de los errores)
+
+Durbin-Watson
+H0:los errores son independientes [p-value > 0.05]
+H1:los errores no son independientes [p-value < 0.05]
+
+DWT: 
+- d = 2 indica no autocorrelacion
+
+- d < 2 indica una correlacion serial positiva. 
+  Solucion: consider adding lags of the dependent and/or                independent variable to the model.
+  
+- d > 2 indica una correlacion serial negativa. 
+  Solucion: check to make sure that none of your variables are overdifferenced.
+
+```{r}
+library(car)
+
+durbinWatsonTest(wls_model,
+                 simulate=TRUE,
+                 reps=1000)
+```
+
+Test de Breusch-Godfrey
+```{r}
+lm1<-bgtest(wls_model,order = 1)
+
+print(lm1)
+```
+```{r}
+lm2<-bgtest(wls_model,order = 2)
+
+print(lm2)
+```
+Test de Ljung-Box
+```{r}
+Box.test(residuals(wls_model),type="Ljung-Box")
+```
+
+
+7. Presencia de outliers y valores influyentes
+
+Se observa que dentro del modelo existe un outlier correspondiente a la observacion 22
+```{r}
+outlierTest(wls_model)
+```
+En necesario determinar si presenta un nivel de influencia, de esta o de otras observaciones
+```{r}
+summary(influence.measures(wls_model))
+```
+A pesar de existir observaciones influyentes, se determina lo siguiente:
+
+- cookD(>0.5): deberían ser investigados
+- Studentized Residual (>3): debe de estudiarse
+- Hat value or Leverages Hat (>0.5): 
+```{r}
+influencePlot(wls_model)
+```
+
+
+
+```{r}
+par(mfrow=c(2,2))
+plot(wls_model)
+```
+
+
+#### Predicciones del modelo
+
+Para realizar comprobaciones, necesitamos particionar los datos en entrenamiento y prueba a una razon de 80/20
+
+Si los datos fueran de un solo tipo, se realiza el siguiente procedimiento
+```{r}
+library(caret)
+
+# semilla
+set.seed(123)
+
+# Funcion de particion de datos
+#training.samples <-createDataPartition(df$vol, 
+#                                       times=1,
+#                                       p=0.8, 
+#                                       list=FALSE)
+# conjuntos de training and testing
+#train.data  <- df[training.samples, ]
+
+#test.data <- df[-training.samples, ]
+```
+Dado que nuestros datos tienen niveles de factores, entonces se procede a realizar una particion bajo el metodo SPlit en la misma proporcion de 80-20
+
+```{r}
+library(SPlit)
+
+# 
+training.samples = SPlit(df, 
+                         #tolerance = 1e-6,
+                         nThreads = 3)
+
+train.data = df[training.samples, ]
+
+test.data = df[-training.samples, ]
+```
+```{r}
+# LRM
+train.model <- lm(vol ~ gst_clt + fll_rt +
+                  flte + cst_ind +
+                  trasp + gst_log + tar + gst_mkt + gst_adm +
+                  mercado, 
+                    data = train.data)
+
+# WLS model 
+wt <- 
+  1 / lm(abs(train.model$residuals) ~ train.model$fitted.values)$fitted.values^2
+
+#perform weighted least squares regression
+wls_model <- lm(vol ~ gst_clt + fll_rt +
+                  flte + cst_ind+
+                  trasp + gst_log + tar + gst_mkt + gst_adm +
+                  mercado, 
+                    data = train.data, weights=wt)
+
+
+#view summary of model
+summary(wls_model)
+```
+
+Evaluar el perfomance del modelo
+```{r}
+library(Metrics)
+
+# Make predictions
+predictions <- wls_model %>% predict(test.data)
+
+# Model performance
+# (a) Compute the prediction error, RMSE
+RMSE(predictions, test.data$vol)
+
+# (b) Compute R-square
+R2(predictions, test.data$vol)
+```
+
+
+
+
+
+
+
+
+Fuentes:
+https://www.sthda.com/english/articles/40-regression-analysis/165-linear-regression-essentials-in-r/ [preferido]
+
+https://cienciadedatos.net/documentos/25_regresion_lineal_multiple.html#Ejemplo2_Predictores_num%C3%A9ricos_y_categ%C3%B3ricos
+
+https://cran.r-project.org/web/packages/api2lm/vignettes/influential-observations-diagnostics.html#:~:text=Leverage%20Points,approach%20can%20be%20overly%20sensitive.
+
+https://cran.r-project.org/web/packages/rempsyc/vignettes/assumptions.html#make-the-basic-table
+
+https://rpubs.com/labuitragor/584717
+
+http://courses.atlas.illinois.edu/spring2016/STAT/STAT200/RProgramming/RegressionFactors.html
