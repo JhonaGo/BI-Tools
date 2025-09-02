@@ -1,0 +1,814 @@
+---
+title: "Mayoreo"
+output: html_notebook
+---
+
+**LIBRERIAS**
+```{r}
+getwd()
+```
+
+```{r paqueterias}
+library(dplyr)
+library(readxl)
+library(forecast)
+library(tidyverse)
+library(tidyquant)
+library(timetk)
+library(sweep)
+library(skimr)
+library(imputeTS)
+library(lubridate)
+library(tidyverse)
+library(zoo)
+options(warn=-1)
+```
+
+#DATA PREPARATION
+
+1. Valores por columna
+```{r dataset}
+vtas <- read_excel("G:/Mi unidad/Colab_Bases/Forecasting_SKU_R/vtas.xlsx", 
+                   sheet = "all_data")
+```
+
+```{r names-columns}
+names(vtas)  #nombres de columnas
+```
+
+```{r names-clientes}
+unique(vtas$cliente)  #valores unicos del atributo
+```
+
+#FRECUENCIAS
+
+1. Producto
+```{r descriptivo}
+library(summarytools)
+
+productos<-freq(vtas$SKU, 
+                  plain.ascii = FALSE, 
+                  style = "rmarkdown", 
+                  order = "freq")
+```
+
+2. Clientes
+```{r frecuencias}
+library(summarytools)
+
+clientes <- freq(vtas$cliente, 
+                 plain.ascii = FALSE, 
+                 style = "rmarkdown", 
+                 order = "freq")
+```
+
+
+
+#LIMPIEZA GENERAL
+
+Deseleccionar los **CLIENTES** con baja frecuencia (>90% de contribucion)
+```{r cadenas-s/ciclo}
+vtas<- vtas[  
+    vtas$cliente !="TIENDAS 3B" &
+    vtas$cliente !="SUPER GONZALEZ" &
+    vtas$cliente !="PUMA" &
+    vtas$cliente !="PAO" &
+    vtas$cliente !="MEGABITS" &
+    vtas$cliente !="GSEGOLD"  &
+    vtas$cliente !="ALDEKOM" &
+    vtas$cliente !="ABARROTERA VALLES" &
+    vtas$cliente !="MAXIMA DISTRIBUCION" &
+    vtas$cliente !="ALESUR" &
+    vtas$cliente !="COMP. PARA EL HOGAR" &
+    vtas$cliente !="CONSUELO MARTINEZ" &  
+    vtas$cliente !="GUERRERENSE" &  
+    vtas$cliente !="JD ABARROTES" &  
+    vtas$cliente !="LA Y GRIEGA" &  
+    vtas$cliente !="LIMON" &  
+    vtas$cliente !="PICK-ONE" & 
+    vtas$cliente !="SU CASA" &
+    vtas$cliente !="DIFARMER" &
+    vtas$cliente !="GRUPO MPL GREEN" &
+    vtas$cliente !="JRB"  &
+    vtas$cliente !="LA MIXTECA" &
+    vtas$cliente !="SUPER KOMPRAS" &
+    vtas$cliente !="SUPERISSSTE"  &
+    vtas$cliente !="MACONDGMX" &
+    vtas$cliente !="GRUPO DIMACSAR" &
+    vtas$cliente !="GRUPO DIMACSAR" &
+    vtas$cliente !="FLORIDO" &  
+    vtas$cliente !="DISTRIBUCIONES JASPO" &
+    vtas$cliente !="MERAZ"
+,]
+```
+
+
+```{r}
+library(qcc)
+library(pivottabler)
+options(scipen=999)
+
+
+# Data Set
+ds<-vtas[c("SKU", "cjas")]
+
+#Tabla Pivote con Pivot Tabler
+pt <- PivotTable$new()
+pt$addData(ds)
+pt$addRowDataGroups("SKU")
+pt$defineCalculation(calculationName="cjas", 
+                      summariseExpression="n()")
+pt$evaluatePivot()
+df <- pt$asDataFrame(rowGroupsAsColumns=TRUE)
+
+df=df[-c(163),]   #eliminar la fila total del pivot table
+
+# Se debe generar una variable etiquetada
+Tipo <- df$cjas
+names(Tipo) <- df$SKU
+
+# Pareto grafica/tabla
+pareto.chart(Tipo)
+
+```
+
+
+
+Deseleccionar productos debajo del umbral >80%
+```{r innovaciones-s/ciclo}
+vtas<- vtas[  
+    vtas$SKU !="Premier Max Fajilla 500 10/4" &
+    vtas$SKU !="Premier 271 8/9" &
+    vtas$SKU !="Big Roll 600 8/6" &
+    vtas$SKU !="TP Premier gigante 1000 6/1" &
+    vtas$SKU !="Elite Premium Soft 225 4/18" &
+    vtas$SKU !="Premier MegaRoll 400 40/1" &
+    vtas$SKU !="Rendiplus 300 10/4" &
+    vtas$SKU !="Rendiplus 320 10/4" & 
+    vtas$SKU !="Elite Soft & Strong 180 3/32" &   
+    vtas$SKU !="Elite Ultra Absorbente 60 8/3" &
+    vtas$SKU !="Elite Cuidado Clasico 200 12/4"
+  ,]
+```
+
+Deseleccionar los **SKU** por principio de Quality Control Charts
+```{r}
+#skus_na<-vtas[!complete.cases(vtas), ]
+
+#library(reshape)
+
+#cast(vtas, SKU ~ Negocio)
+```
+
+
+
+#DATASET
+
+Filtrado de clientes
+```{r filtro-dataset}
+
+#----Nivel Cliente
+
+vtas<-vtas[c("Month", "cliente", "Negocio", "SKU", "cjas")]
+
+#vtas<-vtas[vtas$cliente=="CONSUELO MARTINEZ",]
+```
+
+Sustituir valores negativos(-) por valores perdidos(NA´s)
+```{r valores-negativos}
+vtas$cjas<-replace(vtas$cjas, vtas$cjas<0, NA)
+```
+
+Filtrado de productos
+```{r cliente-sku}
+#DICONSA
+vtas<- vtas[  
+  ##TISSUE
+  vtas$SKU !="Premier Max Fajilla 500 10/4" & 
+    vtas$SKU !="Rendiplus 500 6/6" & 
+    vtas$SKU !="Elite Cuidado Clasico 200 4/12" &
+    vtas$SKU !="Big Roll 600 8/6" &
+  
+  ###PERSONAL CARE
+  vtas$SKU !="Mascarilla Tiquirurgica 20/5" & #FIJO
+    vtas$SKU !="Mascarilla Tiquirurgica 40/50" & #FIJO
+    vtas$SKU !="Cotidian Plus G 6/10" & 
+    vtas$SKU !="Babysec Ultrasec S 4/40" &
+    vtas$SKU !="Babysec Ultrasec G 4/40" &
+    vtas$SKU !="Babysec Ultrasec M 4/40" & 
+    vtas$SKU !="Babysec Ultrasec Xg 4/40" & 
+    vtas$SKU !="Babysec Ultrasec X-xg 4/40"
+  ,]
+```
+
+Missing Values with SMA, by product (each one)
+
+```{r SMA-product}
+
+#----------------------TISSUE-----------------------------------
+
+#--------BIG ROLL
+vtas[vtas$SKU=="Big Roll 550 8/6",]<-
+      na_ma(vtas[vtas$SKU=="Big Roll 550 8/6",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Big Roll 400 12/4",]<-
+     na_ma(vtas[vtas$SKU=="Big Roll 400 12/4",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Big Roll 600 8/6",]<-
+     na_ma(vtas[vtas$SKU=="Big Roll 600 8/6",], k = 4, weighting = "simple", maxgap = Inf)
+
+
+#--------CUIDADO CLASICO
+vtas[vtas$SKU=="Elite Cuidado Clasico 200 12/4",]<-
+      na_ma(vtas[vtas$SKU=="Elite Cuidado Clasico 200 12/4",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Elite Cuidado Clasico 200 2/32",]<-
+      na_ma(vtas[vtas$SKU=="Elite Cuidado Clasico 200 2/32",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Elite Cuidado Clasico 200 4/12",]<-
+      na_ma(vtas[vtas$SKU=="Elite Cuidado Clasico 200 4/12",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Elite Cuidado Clasico 287 10/4",]<-
+      na_ma(vtas[vtas$SKU=="Elite Cuidado Clasico 287 10/4",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Elite Cuidado Clasico 250 12/4",]<-
+      na_ma(vtas[vtas$SKU=="Elite Cuidado Clasico 250 12/4",], k = 4, weighting = "simple", maxgap = Inf)
+
+
+#---------DUO
+vtas[vtas$SKU=="Elite Duo 350 4/12",]<-
+      na_ma(vtas[vtas$SKU=="Elite Duo 350 4/12",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Elite Duo 3/16",]<-
+      na_ma(vtas[vtas$SKU=="Elite Duo 3/16",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Elite Duo 320 10/4",]<-
+      na_ma(vtas[vtas$SKU=="Elite Duo 320 10/4",], k = 4, weighting = "simple", maxgap = Inf)
+	
+
+
+#--------PAÑUELOS
+vtas[vtas$SKU=="Elite Diseño 608/3",]<-
+      na_ma(vtas[vtas$SKU=="Elite Diseño 608/3",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Elite Facial Diseños 24/90",]<-
+      na_ma(vtas[vtas$SKU=="Elite Facial Diseños 24/90",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Elite Compacto Diseños 36/48",]<-
+      na_ma(vtas[vtas$SKU=="Elite Compacto Diseños 36/48",], k = 4, weighting = "simple", maxgap = Inf) 	
+
+vtas[vtas$SKU=="Elite Facial Familiar Dreamy 24/90",]<-
+      na_ma(vtas[vtas$SKU=="Elite Facial Familiar Dreamy 24/90",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Elite Facial Familiar Happy 24/90",]<-
+      na_ma(vtas[vtas$SKU=="Elite Facial Familiar Happy 24/90",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Elite Facial Familiar Relax 24/90",]<-
+      na_ma(vtas[vtas$SKU=="Elite Facial Familiar Relax 24/90",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Elite Facial Frutos Rojos 90/24",]<-
+      na_ma(vtas[vtas$SKU=="Elite Facial Frutos Rojos 90/24",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Elite Facial Mentol 48/100",]<-
+      na_ma(vtas[vtas$SKU=="Elite Facial Mentol 48/100",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Elite Pañuelos Aromas 36/48",]<-
+      na_ma(vtas[vtas$SKU=="Elite Pañuelos Aromas 36/48",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Elite Pañuelo Mentol 36/60",]<-
+      na_ma(vtas[vtas$SKU=="Elite Pañuelo Mentol 36/60",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Pañuelo Pocket Elite Dreamy 36/60",]<-
+      na_ma(vtas[vtas$SKU=="Pañuelo Pocket Elite Dreamy 36/60",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Elite Pañuelo Frutos Rojos 36/6",]<-
+      na_ma(vtas[vtas$SKU=="Elite Pañuelo Frutos Rojos 36/6",], k = 4, weighting = "simple", maxgap = Inf)
+
+
+#-------SERVILLETAS
+vtas[vtas$SKU=="Elite Roja 25X25 24/180",]<-
+      na_ma(vtas[vtas$SKU=="Elite Roja 25X25 24/180",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Elite Clasica 180/24",]<-
+      na_ma(vtas[vtas$SKU=="Elite Clasica 180/24",], k = 4, weighting = "simple", maxgap = Inf)
+
+#------SOFT & STRONG
+vtas[vtas$SKU=="Elite Soft & Strong 180 3/32",]<-
+      na_ma(vtas[vtas$SKU=="Elite Soft & Strong 180 3/32",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Elite Soft & Strong 190 12/4",]<-
+      na_ma(vtas[vtas$SKU=="Elite Soft & Strong 190 12/4",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Elite Soft & Strong 200 4/18",]<-
+      na_ma(vtas[vtas$SKU=="Elite Soft & Strong 200 4/18",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Elite Soft & Strong 200 3/24",]<-
+      na_ma(vtas[vtas$SKU=="Elite Soft & Strong 200 3/24",], k = 4, weighting = "simple", maxgap = Inf)
+
+#--------ELITE ULTRA
+vtas[vtas$SKU=="Elite Ultra 25X25 12/420",]<-
+      na_ma(vtas[vtas$SKU=="Elite Ultra 25X25 12/420",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Elite Ultra Absorbente 180 20/1",]<-
+      na_ma(vtas[vtas$SKU=="Elite Ultra Absorbente 180 20/1",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Elite Ultra Absorbente 160 20/1",]<-
+      na_ma(vtas[vtas$SKU=="Elite Ultra Absorbente 160 20/1",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Elite Ultra 25X25 24/225",]<-
+      na_ma(vtas[vtas$SKU=="Elite Ultra 25X25 24/225",], k = 4, weighting = "simple", maxgap = Inf)
+
+
+
+#-----ELITE ULTRA SUAVE
+vtas[vtas$SKU=="Elite Ultra Suave 220 3/32",]<-
+      na_ma(vtas[vtas$SKU=="Elite Ultra Suave 220 3/32",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Elite Ultra Suave 320 4/12",]<-
+      na_ma(vtas[vtas$SKU=="Elite Ultra Suave 320 4/12",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Elite Ultra 60 8/3",]<-
+      na_ma(vtas[vtas$SKU=="Elite Ultra 60 8/3",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Elite Ultra Suave 300 3/12+4",]<-
+      na_ma(vtas[vtas$SKU=="Elite Ultra Suave 300 3/12+4",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Elite Ultra Suave 200 12/4",]<-
+      na_ma(vtas[vtas$SKU=="Elite Ultra Suave 200 12/4",], k = 4, weighting = "simple", maxgap = Inf)
+
+	
+
+#------ELITE PREMIUM SOFT
+vtas[vtas$SKU=="Elite Premium Soft 200/9",]<-
+      na_ma(vtas[vtas$SKU=="Elite Premium Soft 200/9",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Elite Premium Soft 225 10/4",]<-
+      na_ma(vtas[vtas$SKU=="Elite Premium Soft 225 10/4",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Elite Premium Soft 225 4/12",]<-
+      na_ma(vtas[vtas$SKU=="Elite Premium Soft 225 4/12",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Elite Premium Soft 33X33 9/200",]<-
+      na_ma(vtas[vtas$SKU=="Elite Premium Soft 33X33 9/200",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Elite Premium Soft 225 4/18",]<-
+      na_ma(vtas[vtas$SKU=="Elite Premium Soft 225 4/18",], k = 4, weighting = "simple", maxgap = Inf)
+
+
+
+#-------PREMIER
+vtas[vtas$SKU=="Premier 400 40/1",]<-
+      na_ma(vtas[vtas$SKU=="Premier 400 40/1",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Premier MegaRoll 400 40/1",]<-
+      na_ma(vtas[vtas$SKU=="Premier MegaRoll 400 40/1",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Premier 160 24/4",]<-
+      na_ma(vtas[vtas$SKU=="Premier 160 24/4",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Premier 160 4/18",]<-
+      na_ma(vtas[vtas$SKU=="Premier 160 4/18",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Premier 400 12/4",]<-
+      na_ma(vtas[vtas$SKU=="Premier 400 12/4",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Premier Nova 25X25 12/450",]<-
+      na_ma(vtas[vtas$SKU=="Premier Nova 25X25 12/450",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Premier Max Fajilla 500 10/4",]<-
+      na_ma(vtas[vtas$SKU=="Premier Max Fajilla 500 10/4",], k = 4, weighting = "simple", maxgap = Inf) 	
+
+vtas[vtas$SKU=="Premier Max 600 10/4",]<-
+      na_ma(vtas[vtas$SKU=="Premier Max 600 10/4",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Premier 310 10/4",]<-
+      na_ma(vtas[vtas$SKU=="Premier 310 10/4",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Premier 350 48/1",]<-
+      na_ma(vtas[vtas$SKU=="Premier 350 48/1",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Premier 350 8/9",]<-
+      na_ma(vtas[vtas$SKU=="Premier 350 8/9",], k = 4, weighting = "simple", maxgap = Inf)
+
+
+vtas[vtas$SKU=="Premier 225 2/40",]<-
+      na_ma(vtas[vtas$SKU=="Premier 225 2/40",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Premier 225 10/6",]<-
+      na_ma(vtas[vtas$SKU=="Premier 225 10/6",], k = 4, weighting = "simple", maxgap = Inf)
+	
+vtas[vtas$SKU=="ServiToalla Premier 8/3",]<-
+      na_ma(vtas[vtas$SKU=="ServiToalla Premier 8/3",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Toalla Premier Mega Nova 180 20/1",]<-
+      na_ma(vtas[vtas$SKU=="Toalla Premier Mega Nova 180 20/1",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Premier 300 8/12",]<-
+      na_ma(vtas[vtas$SKU=="Premier 300 8/12",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="TP Premier gigante 1000 6/1",]<-
+      na_ma(vtas[vtas$SKU=="TP Premier gigante 1000 6/1",], k = 4, weighting = "simple", maxgap = Inf)
+
+	
+#------RENDIPLUS
+vtas[vtas$SKU=="Rendiplus 320 10/4",]<-
+      na_ma(vtas[vtas$SKU=="Rendiplus 320 10/4",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Rendiplus 300 4/12",]<-
+      na_ma(vtas[vtas$SKU=="Rendiplus 300 4/12",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Rendiplus 500 6/6",]<-
+      na_ma(vtas[vtas$SKU=="Rendiplus 500 6/6",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Rendiplus 300 10/4",]<-
+      na_ma(vtas[vtas$SKU=="Rendiplus 300 10/4",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Rendiplus 271 3/24",]<-
+      na_ma(vtas[vtas$SKU=="Rendiplus 271 3/24",], k = 4, weighting = "simple", maxgap = Inf)
+
+
+#-----ULTRA SUAVE
+vtas[vtas$SKU=="Elite Ultra Suave 200 12/4",]<-
+      na_ma(vtas[vtas$SKU=="Elite Ultra Suave 200 12/4",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Elite Ultra 160 1/20",]<-
+      na_ma(vtas[vtas$SKU=="Elite Ultra 160 1/20",], k = 4, weighting = "simple", maxgap = Inf)
+
+
+#-----OHSO
+vtas[vtas$SKU=="OHSO Soft 250 8/24",]<-
+      na_ma(vtas[vtas$SKU=="OHSO Soft 250 8/24",], k = 4, weighting = "simple", maxgap = Inf)
+
+
+
+#--------------------------PERSONAL CARE------------------------------
+
+#------BASICS
+vtas[vtas$SKU=="Basic G 4/36",]<-
+      na_ma(vtas[vtas$SKU=="Basic G 4/36",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Basic M 4/40",]<-
+      na_ma(vtas[vtas$SKU=="Basic M 4/40",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Basic S 8/26",]<-
+      na_ma(vtas[vtas$SKU=="Basic S 8/26",], k = 4, weighting = "simple", maxgap = Inf)
+  
+vtas[vtas$SKU=="Basic Xg 4/32",]<-
+      na_ma(vtas[vtas$SKU=="Basic Xg 4/32",], k = 4, weighting = "simple", maxgap = Inf)
+  
+
+#------BABYSEC
+
+vtas[vtas$SKU=="Babysec 24/80",]<-
+      na_ma(vtas[vtas$SKU=="Babysec 24/80",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Babysec 50/20",]<-
+      na_ma(vtas[vtas$SKU=="Babysec 50/20",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Babysec Ultrasec S 4/40",]<-
+      na_ma(vtas[vtas$SKU=="Babysec Ultrasec S 4/40",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Babysec Ultrasec M 4/40",]<-
+      na_ma(vtas[vtas$SKU=="Babysec Ultrasec M 4/40",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Babysec Ultrasec Xg 4/40",]<-
+      na_ma(vtas[vtas$SKU=="Babysec Ultrasec Xg 4/40",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Babysec Ultrasec X-xg 4/40",]<-
+      na_ma(vtas[vtas$SKU=="Babysec Ultrasec X-xg 4/40",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Babysec Ultrasec G 4/40",]<-
+      na_ma(vtas[vtas$SKU=="Babysec Ultrasec G 4/40",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Babysec 24/50",]<-
+      na_ma(vtas[vtas$SKU=="Babysec 24/50",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Babysec unica 50/20",]<-
+      na_ma(vtas[vtas$SKU=="Babysec unica 50/20",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Babysec Flexi Protect G 4/36",]<-
+      na_ma(vtas[vtas$SKU=="Babysec Flexi Protect G 4/36",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Babysec Flexi Protect M 4/38",]<-
+      na_ma(vtas[vtas$SKU=="Babysec Flexi Protect M 4/38",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Babysec Flexi Protect Xg 4/34",]<-
+      na_ma(vtas[vtas$SKU=="Babysec Flexi Protect Xg 4/34",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Babysec Flexi Protect X-xg 4/32",]<-
+      na_ma(vtas[vtas$SKU=="Babysec Flexi Protect X-xg 4/32",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Babysec Clasico Xg 16/3",]<-
+      na_ma(vtas[vtas$SKU=="Babysec Clasico Xg 16/3",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Babysec Clasico G 16/3",]<-
+      na_ma(vtas[vtas$SKU=="Babysec Clasico G 16/3",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Babysec Classic Plus G 4/40",]<-
+      na_ma(vtas[vtas$SKU=="Babysec Classic Plus G 4/40",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Babysec Classic Plus M 4/40",]<-
+      na_ma(vtas[vtas$SKU=="Babysec Classic Plus M 4/40",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Babysec Classic Plus S 4/40",]<-
+      na_ma(vtas[vtas$SKU=="Babysec Classic Plus S 4/40",], k = 4, weighting = "simple", maxgap = Inf)
+
+
+
+
+#-----BRAZIL
+vtas[vtas$SKU=="Brazil Plus M 4/40",]<-
+      na_ma(vtas[vtas$SKU=="Brazil Plus M 4/40",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Brazil Plus G 16/3",]<-
+      na_ma(vtas[vtas$SKU=="Brazil Plus G 16/3",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Brazil Plus Xg 16/3",]<-
+      na_ma(vtas[vtas$SKU=="Brazil Plus Xg 16/3",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Brazil Plus G 4/40",]<-
+      na_ma(vtas[vtas$SKU=="Brazil Plus G 4/40",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Brazil Plus M 16/3",]<-
+      na_ma(vtas[vtas$SKU=="Brazil Plus M 16/3",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Brazil Plus Xg 4/40",]<-
+      na_ma(vtas[vtas$SKU=="Brazil Plus Xg 4/40",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Brazil Plus S 4/40",]<-
+      na_ma(vtas[vtas$SKU=="Brazil Plus S 4/40",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Brazil Plus M 4/40",]<-
+      na_ma(vtas[vtas$SKU=="Brazil Plus M 4/40",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Brazil Classic Plus G 4/40",]<-
+      na_ma(vtas[vtas$SKU=="Brazil Classic Plus G 4/40",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Brazil Classic Plus M 4/40",]<-
+      na_ma(vtas[vtas$SKU=="Brazil Classic Plus M 4/40",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Brazil Classic Plus S 4/40",]<-
+      na_ma(vtas[vtas$SKU=="Brazil Classic Plus S 4/40",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Brazil Classic Plus Xg 4/40",]<-
+      na_ma(vtas[vtas$SKU=="Brazil Classic Plus Xg 4/40",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Brazil Plus M 4/40",]<-
+      na_ma(vtas[vtas$SKU=="Brazil Plus M 4/40",], k = 4, weighting = "simple", maxgap = Inf)
+
+
+#------COTIDIAN
+vtas[vtas$SKU=="Cotidian Plus G 6/10",]<-
+      na_ma(vtas[vtas$SKU=="Cotidian Plus G 6/10",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Cotidian Plus M 6/10",]<-
+      na_ma(vtas[vtas$SKU=="Cotidian Plus M 6/10",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Cotidian Predoblado 6/10",]<-
+      na_ma(vtas[vtas$SKU=="Cotidian Predoblado 6/10",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Cotidian Clasico G 6/10",]<-
+      na_ma(vtas[vtas$SKU=="Cotidian Clasico G 6/10",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Cotidian Clasico M 6/10",]<-
+      na_ma(vtas[vtas$SKU=="Cotidian Clasico M 6/10",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Cotidian Protector De Cama 6/10",]<-
+      na_ma(vtas[vtas$SKU=="Cotidian Protector De Cama 6/10",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Cotidian Pants G 8/10",]<-
+      na_ma(vtas[vtas$SKU=="Cotidian Pants G 8/10",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Cotidian Plus G 4/20",]<-
+      na_ma(vtas[vtas$SKU=="Cotidian Plus G 4/20",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Cotidian Pants M 8/10",]<-
+      na_ma(vtas[vtas$SKU=="Cotidian Pants M 8/10",], k = 4, weighting = "simple", maxgap = Inf) 
+
+vtas[vtas$SKU=="Cotidian Basico G 6/6",]<-
+      na_ma(vtas[vtas$SKU=="Cotidian Basico G 6/6",], k = 4, weighting = "simple", maxgap = Inf) 
+	
+
+#----- MUNDO BABY
+vtas[vtas$SKU=="Mundo Baby Ch 4/30",]<-
+      na_ma(vtas[vtas$SKU=="Mundo Baby Ch 4/30",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Mundo Baby G 16/3",]<-
+      na_ma(vtas[vtas$SKU=="Mundo Baby G 16/3",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Mundo Baby G 4/30",]<-
+      na_ma(vtas[vtas$SKU=="Mundo Baby G 4/30",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Mundo Baby M 16/3",]<-
+      na_ma(vtas[vtas$SKU=="Mundo Baby M 16/3",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Mundo Baby M 4/30",]<-
+      na_ma(vtas[vtas$SKU=="Mundo Baby M 4/30",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Mundo Baby Xg 16/3",]<-
+      na_ma(vtas[vtas$SKU=="Mundo Baby Xg 16/3",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Mundo Baby X-xg 4/30",]<-
+      na_ma(vtas[vtas$SKU=="Mundo Baby X-xg 4/30",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Mundo Baby Xg 4/30",]<-
+      na_ma(vtas[vtas$SKU=="Mundo Baby Xg 4/30",], k = 4, weighting = "simple", maxgap = Inf)
+
+#-----MASCARILLAS
+vtas[vtas$SKU=="Mascarilla Tiquirurgica 20/5",]<-
+      na_ma(vtas[vtas$SKU=="Mascarilla Tiquirurgica 20/5",], k = 4, weighting = "simple", maxgap = Inf)
+
+
+#-----SOFT DREAMS
+vtas[vtas$SKU=="Soft Dreams M 4/38",]<-
+      na_ma(vtas[vtas$SKU=="Soft Dreams M 4/38",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Soft Dreams G 4/36",]<-
+      na_ma(vtas[vtas$SKU=="Soft Dreams G 4/36",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Soft Dreams Xg 4/34",]<-
+      na_ma(vtas[vtas$SKU=="Soft Dreams Xg 4/34",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Soft Dreams S 4/40",]<-
+      na_ma(vtas[vtas$SKU=="Soft Dreams S 4/40",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Soft Dreams 24/80",]<-
+      na_ma(vtas[vtas$SKU=="Soft Dreams 24/80",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Soft Dreams X-xg 4/32",]<-
+      na_ma(vtas[vtas$SKU=="Soft Dreams X-xg 4/32",], k = 4, weighting = "simple", maxgap = Inf)
+
+
+
+#-----SOFT TAILS
+vtas[vtas$SKU=="Soft Tails Basic G 4/36",]<-
+      na_ma(vtas[vtas$SKU=="Soft Tails Basic G 4/36",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Soft Tails Basic M 4/40",]<-
+      na_ma(vtas[vtas$SKU=="Soft Tails Basic M 4/40",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Soft Tails Basic S 8/26",]<-
+      na_ma(vtas[vtas$SKU=="Soft Tails Basic S 8/26",], k = 4, weighting = "simple", maxgap = Inf)
+
+vtas[vtas$SKU=="Soft Tails Basic Xg 4/32",]<-
+      na_ma(vtas[vtas$SKU=="Soft Tails Basic Xg 4/32",], k = 4, weighting = "simple", maxgap = Inf)
+
+```
+
+```{r summary-atributo}
+vtas %>%
+  group_by(SKU) %>%
+  skim()
+```
+
+convert month column to type Date
+
+```{r time-zone}
+#class(vtas$Month)
+#Sys.timezone()
+vtas$Month<-as.Date(vtas$Month, format="%Y-%m-%d")
+```
+
+#TIME SERIE PLOT
+
+visualizing by sku
+
+```{r serie-chart}
+ggplot(vtas, aes(x = Month, y = cjas, group = SKU)) +
+      geom_line(aes(color = SKU), size = 0.75) +
+      geom_point(aes(color = SKU), size = 0.95) + 
+      labs(title = "Vol por producto",subtitle = "Data from 2022 to 2024")+
+      theme_tq()
+
+sales_nest <- vtas %>% group_by(SKU) %>% nest()
+```
+
+#HOLT WINTER´S MODEL
+
+convert to time series
+
+```{r sales-ts}
+sales_ts <- sales_nest %>%
+  mutate(data.ts = map(.x       = data, 
+                       .f       = tk_ts, 
+                       select   = -Month, 
+                       start    = c(2022,1),
+                       freq     = 4))
+```
+
+model the time series
+
+```{r sales-fit}
+sales_fit <- sales_ts %>%
+  mutate(fit.HoltWinters = map(.x = data.ts,
+                               .f = HoltWinters))
+```
+
+tidying
+
+```{r tidying}
+tidydata <- sales_fit %>%
+  mutate(tidy = map(fit.HoltWinters,sw_tidy))  %>%
+  unnest(tidy) %>%
+  spread(key = SKU, value = estimate)
+```
+
+check model accuracy
+
+```{r glance-data}
+glancedata <- sales_fit %>%
+  mutate(glance = map(fit.HoltWinters, sw_glance)) %>%
+  unnest(glance)
+
+glancedata<- glancedata[,c(1, 5,6,10:16)]
+```
+
+check fitted and residual values
+
+```{r augment-data}
+augmentdata <- sales_fit %>%
+  mutate(augment = map(fit.HoltWinters, sw_augment, timetk_idx = TRUE,
+                       rename_index ="date")) %>% unnest(augment)
+```
+
+plot the residuals/actuals
+
+```{r residual-chart}
+augmentdata %>%
+  ggplot(aes(x = date, y = .resid, group = SKU)) +
+  geom_hline(yintercept = 0, color = "grey40") +
+  geom_line(color = palette_light()[[2]]) +
+  geom_smooth(method = "loess") +
+  labs(title = "Quantity Sold By SKU",
+       subtitle = "HoltWinters Model Residuals", x = "") +
+  theme_tq() +
+  facet_wrap(~ SKU, scale = "free_y", ncol = 3) +
+  scale_x_date(date_labels = "%Y")
+```
+
+forecast with the model
+
+```{r forecast-period}
+sales_forecast <- sales_fit %>%
+  mutate(forecast.HoltWinters = map(fit.HoltWinters, forecast, h =15))
+```
+
+tidy the forecast
+
+```{r forecast-tidy}
+sales_forecast_tidy <- sales_forecast %>%
+  mutate(sweep = map(forecast.HoltWinters, sw_sweep, timetk_idx = TRUE)) %>%
+  unnest(sweep)
+```
+
+visualize
+
+```{r forecast-charts}
+sales_forecast_tidy %>%
+  ggplot(aes(x = index, y = cjas, color = key, group = SKU)) +
+  geom_ribbon(aes(ymin = lo.95, ymax = hi.95), 
+              fill = "#D5DBFF", color = NA, size = 0) +
+  geom_ribbon(aes(ymin = lo.80, ymax = hi.80, fill = key), 
+              fill = "#596DD5", color = NA, size = 0, alpha = 0.8) +
+  geom_line() +
+  labs(title = "Quantity Sold By SKU",
+       subtitle = "Holt Winters Model Forecasts",
+       x = "", y = "Units") +
+  scale_x_date(date_breaks = "1 year", date_labels = "%Y") +
+  scale_color_tq() +
+  scale_fill_tq() +
+  facet_wrap(~ SKU, scales = "free_y", ncol = 3) +
+  theme_tq() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+#POINT FORECAST: pre/post produccion
+
+write the tidy sales forecast to excel
+
+```{r forecast-df}
+point_forecasts <- as.data.frame(sales_forecast_tidy[,c(1,6:12)])
+```
+
+```{r actual-data}
+actual <- point_forecasts[point_forecasts$key == "actual",]
+
+actual<- actual %>% filter(index < '2024-10-01')
+```
+
+```{r future-data}
+future <- point_forecasts[point_forecasts$key == "forecast",]
+
+future<-future %>% filter(between(index, as.Date('2024-10-01'),                                                        as.Date('2025-12-01')))
+```
+
+```{r joint-data}
+point_forecasts<-rbind(actual,future)
+```
+
+```{r forecast-xlsx}
+#writexl::write_xlsx(point_forecasts,"DICONSA.xlsx")
+```
+
+
+
