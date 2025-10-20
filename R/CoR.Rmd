@@ -1,0 +1,248 @@
+---
+title: "Trades Terms"
+output:
+  word_document: default
+---
+
+Paqueterias
+```{r}
+#radiant::radiant()
+library(tidyverse)
+library(cluster)    
+library(factoextra)
+library(ggplot2)
+library(readxl)
+library(ade4)
+library(stats)
+library(NbClust)
+library(psych)
+library(haven)
+library(reshape)
+library(dplyr)
+library(pacman)
+library(gridExtra)
+p_load(cluster, aplpack, fpc, foreign, TeachingDemos,
+       factoextra, NbClust, ape, corrplot, DataExplorer,
+       funModeling, compareGroups, tidyverse, dendextend,
+       igraph, FeatureImpCluster, flexclust, LICORS, h2o,
+       gghighlight)
+```
+
+Preguntas de investigacion:
+
+1) Cuál es el impacto de que las variables gasto-cliente con relación al desempeño de las ventas generadas por las cadenas
+
+2) De qué manera pueden agruparse las cadenas comerciales en función de las variables gasto-cliente más relevantes
+
+
+
+==============
+PREPARAR DATOS
+==============
+
+Omitir la notacion cientifica, y redondear a 2 digitos los calculos
+```{r}
+options(scipen=999)
+options(digits = 2)      
+```
+
+Seleccion de las variables a trabajar
+```{r}
+vtas_gasto <- read_excel("vtas_gasto.xlsx")
+vtas_gasto<-vtas_gasto[,1:22]
+```
+
+=====================
+ANALISIS EXPLORATORIO
+=====================
+
+Medidas de tendencia central
+```{r}
+summary(vtas_gasto[3:20])
+```
+Se observa que no existen datos en las variables en e-commerce, marca y no devolución, descarga asistida. Se descartan estas variables para el analsis
+
+
+Histogramas
+```{r}
+plot_histogram(vtas_gasto[3:20])
+```
+Densidad
+```{r}
+plot_density(vtas_gasto[3:20])
+```
+Se confirma de que las variables de interes no presentan una distribucion uniforme, por lo que se confirma la presencia de valores relevantes selectivos, es decir: no necesariamente son valores atipicos la ausencia de datos.
+
+==================
+REGRESION MULTIPLE
+==================
+Con el objeto de conocer, a nivel general, la relevancia de las variables gasto-cliente por cada una de las cadenas comerciales se recurre a la regresion multiple.
+
+
+1) analizar la relacion entre variables
+  se excluyen las variables nc/revenue y vtas (por ser la variable dependiente)
+```{r}
+corr<-round(cor(x = vtas_gasto[3:20], method = "pearson"), 2)
+corr
+#write.csv(corr, "cor.csv")
+```
+Revisar el archivo en excel sobre las correlaciones
+
+
+2) Generar el modelo base
+```{r}
+m1<-lm(vta_cjas~cinco_trade+APP+apertura+                   comer_fija+direc_comercial+grid_adSO+grid_promo+plan_crec+plan_vis+portal+precio_comp+promo_temp+promotoria+pront_pago, data=vtas_gasto)
+summary(m1)
+```
+Se tiene un coeficiente R de 0.98 elevado, que puede explicar el 98% de la variabilidad del desempeño de ventas por cliente. El p-value es menor al 0.05, por lo que algunos de los coeficientes del modelo es distinta de cero, sin embargo alguno de ellos no son significativos y no podrían contribuir al modelo.
+
+3) Seleccion de los mejores predictores: estrategia stepwise mixto. 
+Se emplea el valor matematico del Akike (AIC)
+```{r}
+step(object = m1,direction = "both",trace = 1)
+```
+Se observa que el modelo mejor evaluado es el siguiente:
+```{r}
+modelo<-lm(formula = vta_cjas ~ cinco_trade + apertura + comer_fija + 
+    direc_comercial + grid_adSO + grid_promo + plan_vis + portal + 
+    precio_comp + pront_pago, data = vtas_gasto)
+summary(modelo)
+```
+Conclusion preliminar:
+Las variables que tienen una mayor contribución son: 0.5 Trade,Apertura, Precio Competitivo.
+Sin embargo, existen variables que resultan contraintuitivas: plan de visibilidad (-0.034), grid adicional SO(-0.030), y direccion comercial(-0.016).Esto se contrarresta con otros tipos de variables que aportan positiva y marginalmente.
+
+P.ejmplo: por cada unidad que aumenta el predictor 0.5 TRADE, las ventas en cja aumenta en promedio un 0.7214 unidades. Siempre y cuando se mantengan constantes los demas predictores.
+
+3.1)Intervalos de confianza para cada uno de los coeficientes parciales de la regresion
+```{r}
+confint(lm(formula = vta_cjas ~ cinco_trade + apertura + comer_fija + 
+    direc_comercial + grid_adSO + grid_promo + plan_vis + portal + 
+    precio_comp + pront_pago, data = vtas_gasto))
+```
+Se afirma que ningun coefieciente tiende a cero en la pendiente.
+
+4) validacion de condiciones para la regresion lineal multiple
+Recordar que si la relacion es lineal, significa que los residuos se distribuyen aleatoriamente en 0 con una variable constante sobre el eje de las abscisas
+```{r}
+plot1<-ggplot(data=vtas_gasto,aes(cinco_trade,modelo$residuals))+
+      geom_point()+geom_smooth(color = "firebrick")+geom_hline(yintercept = 0)+theme_bw()
+
+plot2<-ggplot(data=vtas_gasto,aes(apertura,modelo$residuals))+
+      geom_point()+geom_smooth(color = "firebrick")+geom_hline(yintercept = 0)+theme_bw()
+
+plot3<-ggplot(data=vtas_gasto,aes(comer_fija,modelo$residuals))+
+      geom_point()+geom_smooth(color = "firebrick")+geom_hline(yintercept = 0)+theme_bw()
+
+plot4<-ggplot(data=vtas_gasto,aes(direc_comercial,modelo$residuals))+
+      geom_point()+geom_smooth(color = "firebrick")+geom_hline(yintercept = 0)+theme_bw()
+
+plot5<-ggplot(data=vtas_gasto,aes(grid_adSO,modelo$residuals))+
+      geom_point()+geom_smooth(color = "firebrick")+geom_hline(yintercept = 0)+theme_bw()
+
+plot6<-ggplot(data=vtas_gasto,aes(grid_promo,modelo$residuals))+
+      geom_point()+geom_smooth(color = "firebrick")+geom_hline(yintercept = 0)+theme_bw()
+
+plot7<-ggplot(data=vtas_gasto,aes(plan_vis,modelo$residuals))+
+      geom_point()+geom_smooth(color = "firebrick")+geom_hline(yintercept = 0)+theme_bw()
+
+plot8<-ggplot(data=vtas_gasto,aes(portal,modelo$residuals))+
+      geom_point()+geom_smooth(color = "firebrick")+geom_hline(yintercept = 0)+theme_bw()
+
+plot9<-ggplot(data=vtas_gasto,aes(precio_comp,modelo$residuals))+
+      geom_point()+geom_smooth(color = "firebrick")+geom_hline(yintercept = 0)+theme_bw()
+
+plot10<-ggplot(data=vtas_gasto,aes(pront_pago,modelo$residuals))+
+      geom_point()+geom_smooth(color = "firebrick")+geom_hline(yintercept = 0)+theme_bw()
+
+grid.arrange(plot1, plot2, plot3, plot4,plot5,plot6,plot7,plot8,plot9,plot10)
+```
+
+==========================
+ANALISIS DE CONGLOMERADOS
+==========================
+Una vez conociendo las variables de relevancia meidante el metodo de regresion multiple con las variables: cinco_trade || apertura || comer_fija || direc_comercial || grid_adSO || grid_promo || plan_vis || portal || precio_comp || pront_pago
+
+Estandarizaion de datos a la misma escala
+  Se realiza este proceso a fin de que ninguna de las variables tenga mayor peso que las otras al momento de realizar el analisis de clusters
+```{r}
+vta_gasto.norm<-scale(
+                       select(vtas_gasto,
+                         cinco_trade,apertura,                     comer_fija,direc_comercial,grid_adSO,grid_promo,plan_crec,plan_vis,portal,precio_comp,pront_pago))
+
+vta_gasto.est<-as.data.frame(vta_gasto.norm)
+```
+
+Matriz de correlaciones
+```{r}
+cor(vta_gasto.est)
+```
+#```{r}
+plot(vtas_gasto$vta_cjas~ vtas_gasto$direc_comercial, data = vtas_gasto)
+with(vtas_gasto,text(vtas_gasto$vta_cjas ~ vtas_gasto$direc_comercial, labels=vtas_gasto$cliente,pos=4))
+#```
+
+
+MEDIDAS DE SIMILARIDAD
+
+Matriz de distancia euclidea
+```{r}
+matriz.dis.euclid<-dist(vta_gasto.est, method = "euclidean", diag = TRUE)
+```
+
+distancia euclidea al cuadrado
+```{r}
+matriz.dis.euclid2<-(matriz.dis.euclid)^2
+```
+
+
+SELECCION DEL NUMERO DE CLUSTERS
+
+1) centroide:se sugieren 2 grupos
+```{r}
+NbClust(vta_gasto.est, distance="euclidean", min.nc = 2,
+             max.nc=15, method="centroid", index="alllong")
+```
+
+2)vecino más cercano: se sugieren 2 grupos
+```{r}
+NbClust(vta_gasto.est, distance="euclidean", min.nc = 2,
+             max.nc=15, method="single", index="alllong")
+```
+
+3)vecino más lejano: se aconsejan 2 grupos
+```{r}
+NbClust(vta_gasto.est, distance="euclidean", min.nc = 2,
+             max.nc=15, method="complete", index="alllong")
+```
+
+4)average: se aconsejan 2 grupos
+```{r}
+NbClust(vta_gasto.est, distance="euclidean", min.nc = 2,,
+             max.nc=15, method="average", index="alllong")
+```
+
+5)ward: se aconsejan 2 grupos
+```{r}
+NbClust(vta_gasto.est, distance="euclidean", min.nc = 2,
+             max.nc=15, method="ward.D2", index="alllong")
+```
+
+
+ANALISIS JERARQUICO DE CONGLOMERADOS
+
+Metodo del vecino más lejano o complete linkage
+```{r}
+hclust.centro<- hclust(matriz.dis.euclid2,method="centroid")
+```
+
+Dendograma del vecino más lejano o complete linkage
+```{r}
+complete<-plot(hclust.centro,labels=vtas_gasto$cliente) 
+          rect.hclust(hclust.centro, k = 1, border = "red")
+```
+
+
+
+
+
